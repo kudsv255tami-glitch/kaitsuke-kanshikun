@@ -6,27 +6,17 @@ import re
 from datetime import datetime
 from PIL import Image
 
-# --- Constants ---
+# --- Configuration & State ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "data_storage.json")
 LOCAL_ICON = os.path.join(BASE_DIR, "assets", "icon.png")
 ICON_URL = "https://raw.githubusercontent.com/kudsv255tami-glitch/kaitsuke-kanshikun/main/assets/icon.png"
 UPDATE_INTERVAL = 300 
 
-# --- Streamlit Setup ---
 st.set_page_config(page_title="買付監視くん", page_icon=Image.open(LOCAL_ICON) if os.path.exists(LOCAL_ICON) else "🏹", layout="centered")
 
-# Session State Initialization
 if "notified_targets" not in st.session_state: st.session_state.notified_targets = set()
 if "last_refresh" not in st.session_state: st.session_state.last_refresh = datetime.now()
-
-# Common Japanese Stock Names
-COMMON_JP_NAMES = {
-    "7203.T": "トヨタ自動車", "2914.T": "JT", "9432.T": "NTT", "9984.T": "ソフトバンクグループ",
-    "6758.T": "ソニーグループ", "8306.T": "三菱UFJフィナンシャルG", "8411.T": "みずほフィナンシャルG",
-    "8316.T": "三井住友フィナンシャルG", "7267.T": "本田技研工業", "6954.T": "ファナック",
-    "6098.T": "リクルートHD", "4502.T": "武田薬品工業", "7974.T": "任天堂", "435A.T": "iFreeETF 日本株 配当 ローテーション"
-}
 
 # --- Functions ---
 def load_data():
@@ -53,28 +43,36 @@ def fetch_price(ticker):
         if not hist.empty:
             p = hist['Close'].iloc[-1]
             info = stock.info
-            name = COMMON_JP_NAMES.get(final_ticker)
-            if not name:
-                raw = info.get('longName') or info.get('shortName') or final_ticker
-                name = re.sub(r'\b(CORP|INC|LTD|HOLDINGS|GROUP|JAPAN)\b', '', raw.upper()).strip() if final_ticker.endswith(".T") else raw
+            name = info.get('longName') or info.get('shortName') or final_ticker
+            if final_ticker.endswith(".T"):
+                name = re.sub(r'\b(CORP|INC|LTD|HOLDINGS|GROUP|JAPAN)\b', '', name.upper()).strip()
             u = "円" if info.get('currency', 'JPY') == "JPY" else "ドル"
             return round(p, 2), name, final_ticker, u
         return None, None, final_ticker, "円"
     except: return None, None, final_ticker, "円"
 
-# --- CSS & JS ---
+# --- UI Styling (Advanced Native Look) ---
 st.markdown(f"""
 <style>
     header, footer, #MainMenu {{ visibility: hidden; display: none !important; }}
     [data-testid="stHeader"] {{ height: 0px !important; display: none !important; }}
-    [data-testid="stMainBlockContainer"] {{ padding: 1rem !important; padding-top: 1rem !important; max-width: 100% !important; }}
+    [data-testid="stMainBlockContainer"] {{ padding: 1rem !important; padding-top: 1.5rem !important; max-width: 100% !important; }}
     .stApp {{ background-color: #f2f2f7; }}
-    [data-testid="stExpander"] {{ background-color: white; border-radius: 12px; border: 1px solid #e5e5ea; }}
-    [data-testid="stVerticalBlockBorderWrapper"] > div {{ background-color: white; border-radius: 16px; padding: 12px; border: 1px solid #e5e5ea; margin-bottom: 10px; }}
-    .price-text {{ font-size: 2.3rem; font-weight: 900; color: #007aff; text-align: right; margin: 4px 0; line-height: 1; }}
-    .p-unit {{ font-size: 1rem; color: #3a3a3c; margin-left: 5px; }}
-    .lbl {{ font-size: 0.8rem; color: #8e8e93; font-weight: 600; }}
-    .val {{ font-size: 1.1rem; font-weight: 800; color: #1c1c1e; }}
+    
+    /* Native-like Containers */
+    [data-testid="stVerticalBlockBorderWrapper"] > div {{
+        background-color: white; border-radius: 14px; padding: 14px; border: 1px solid #e5e5ea; box-shadow: 0 1px 2px rgba(0,0,0,0.05); margin-bottom: 15px;
+    }}
+    
+    /* Large Price via st.metric override */
+    [data-testid="stMetricValue"] {{ font-size: 2.5rem !important; font-weight: 900 !important; color: #007aff !important; }}
+    [data-testid="stMetricLabel"] {{ font-size: 1.1rem !important; font-weight: 800 !important; color: #1c1c1e !important; }}
+    
+    /* Inputs */
+    input, select, button {{ font-size: 16px !important; }}
+    
+    /* Success/Alert override */
+    .stAlert {{ border-radius: 10px !important; border: none !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -96,24 +94,17 @@ if (!window.kInjected) {{
 </script>
 """, height=0)
 
-def trigger_notification(title, body):
-    st.components.v1.html(f"<script>window.notif.send('{title}', '{body}');</script>", height=0)
+# --- App Header ---
+st.markdown(f"<div style='display:flex; align-items:center; gap:10px; margin-bottom:10px;'><img src='{ICON_URL}' width='45'><h1 style='margin:0; font-size:1.7rem;'>買付監視くん</h1></div>", unsafe_allow_html=True)
 
-# --- Header ---
-h1, h2 = st.columns([1, 4])
-with h1:
-    if os.path.exists(LOCAL_ICON): st.image(LOCAL_ICON, width=54)
-    else: st.markdown("### 🏹")
-with h2: st.markdown("<h1 style='padding-top:10px;'>買付監視くん</h1>", unsafe_allow_html=True)
-
-# --- Notification Config ---
-c_notif, c_test = st.columns(2)
-with c_notif:
-    if st.button("🔔 スマホ通知を有効にする", use_container_width=True):
+# Notification Config
+with st.container(border=True):
+    cn1, cn2 = st.columns(2)
+    if cn1.button("🔔 通知を許可する", use_container_width=True):
         st.components.v1.html("<script>window.notif.ask();</script>", height=0)
-with c_test:
-    if st.button("🧪 テスト通知を送る", use_container_width=True):
-        trigger_notification("テスト通知", "監視くんが正常に動作しています！")
+    if cn2.button("🧪 テスト通知", use_container_width=True):
+        st.components.v1.html(f"<script>window.notif.send('監視テスト', '通知は正常です！');</script>", height=0)
+    st.caption("※iPhoneの場合、Safariの共有メニューから「ホーム画面に追加」した後に許可する必要があります。不要な場合はiPhoneの設定からいつでもオフにできます。")
 
 # --- Add ---
 with st.expander("➕ 銘柄を追加"):
@@ -129,56 +120,61 @@ with st.expander("➕ 銘柄を追加"):
             else: st.warning("追加済み")
         else: st.error("取得失敗")
 
-# --- List ---
+# --- Stock Watchlist ---
 db = load_data()
 if not db['stocks']:
     st.info("銘柄を追加してください")
 else:
-    pending_alerts = []
     for idx, s in enumerate(db['stocks']):
         unit = s.get("unit", "円")
         pnow = s['last_price']
         t1, t2 = float(s.get('odd_lot_target', 0)), float(s.get('one_lot_target', 0))
         
         with st.container(border=True):
-            st.markdown(f"**{s['name']}** <small style='color:#8e8e93'>{s['ticker']}</small>", unsafe_allow_html=True)
-            st.markdown(f'<div class="price-text">{pnow:.2f}<span class="p-unit">{unit}</span></div>', unsafe_allow_html=True)
+            # Row 1: Native Metric (Beautiful Large Price)
+            st.metric(label=f"{s['name']}", value=f"{pnow:,.2f} {unit}")
+            st.caption(f"コード: {s['ticker']}")
             
+            # Row 2: Target Display
             tc1, tc2 = st.columns(2)
-            for i, (label, val, reached) in enumerate([("単元未満", t1, t1 > 0 and pnow <= t1), ("単元", t2, t2 > 0 and pnow <= t2)]):
+            for i, (label, val, reached) in enumerate([("単元未満ライン", t1, t1 > 0 and pnow <= t1), ("単元ライン", t2, t2 > 0 and pnow <= t2)]):
                 col = tc1 if i == 0 else tc2
-                col.markdown(f'<div class="lbl">{label}</div>', unsafe_allow_html=True)
-                col.markdown(f'<div class="val">{val:.2f}{unit if val > 0 else ""}</div>' if val > 0 else '<div class="val">未設定</div>', unsafe_allow_html=True)
+                col.markdown(f"**{label}**")
                 if val > 0:
+                    col.write(f"{val:,.2f} {unit}")
                     if reached:
                         col.success("✅ 到達", icon="🎯")
+                        # Notification trigger
                         aid = f"{s['ticker']}_{label}_{val}"
                         if aid not in st.session_state.notified_targets:
-                            pending_alerts.append((s['name'], label, f"{val:.2f}{unit}"))
+                            st.components.v1.html(f"<script>window.notif.send('【{label}】到達', '{s['name']} が {val:,.2f}{unit} に到達しました！');</script>", height=0)
                             st.session_state.notified_targets.add(aid)
-                    else: col.markdown('<small style="color:#8e8e93">● 監視中</small>', unsafe_allow_html=True)
+                    else: col.markdown("<small style='color:#8e8e93'>● 監視中</small>", unsafe_allow_html=True)
+                else: col.write("未設定")
             
-            # Integrated Settings
-            if st.button(f"⚙️ 設定 ({s['ticker']})", key=f"btn_{s['ticker']}", use_container_width=True):
+            # Row 3: Integrated Settings
+            if st.button(f"⚙️ 設定と削除 ({s['ticker']})", key=f"btn_{s['ticker']}", use_container_width=True):
                 st.session_state[f"ed_{s['ticker']}"] = not st.session_state.get(f"ed_{s['ticker']}", False)
+            
             if st.session_state.get(f"ed_{s['ticker']}", False):
                 with st.form(f"form_{s['ticker']}"):
-                    nn, nu = st.text_input("表示名", value=s['name']), st.selectbox("通貨", ["円", "ドル"], 0 if unit=="円" else 1)
+                    nn = st.text_input("表示名", value=s['name'])
+                    nu = st.selectbox("通貨", ["円", "ドル"], 0 if unit=="円" else 1)
                     ec1, ec2 = st.columns(2)
-                    v1, v2 = ec1.number_input("単元未満目標", value=t1, step=0.1), ec2.number_input("単元目標", value=t2, step=0.1)
-                    eb1, eb2 = st.columns(2)
-                    if eb1.form_submit_button("保存"):
+                    v1 = ec1.number_input("単元未満目標", value=t1, step=0.1)
+                    v2 = ec2.number_input("単元目標", value=t2, step=0.1)
+                    b1, b2 = st.columns(2)
+                    if b1.form_submit_button("保存"):
                         s['name'], s['unit'], s['odd_lot_target'], s['one_lot_target'] = nn, nu, v1, v2
                         save_data(db); st.session_state[f"ed_{s['ticker']}"] = False; st.rerun()
-                    if eb2.form_submit_button("削除"): db['stocks'].pop(idx); save_data(db); st.rerun()
-
-    for n, l, p in pending_alerts: trigger_notification(f"【{l}】到達", f"{n} が {p} に到達しました！")
+                    if b2.form_submit_button("削除"):
+                        db['stocks'].pop(idx); save_data(db); st.rerun()
 
 # --- Footer ---
 st.divider()
-ff1, ff2 = st.columns([3, 1])
-ff1.caption(f"最終更新: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
-if ff2.button("🔄 更新", use_container_width=True):
+fl1, fl2 = st.columns([3, 1])
+fl1.caption(f"最終更新: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
+if fl2.button("🔄 更新", use_container_width=True):
     ndb = load_data()
     for item in ndb['stocks']:
         px, _, _, _ = fetch_price(item['ticker'])
