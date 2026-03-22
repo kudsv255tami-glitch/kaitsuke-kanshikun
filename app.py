@@ -7,12 +7,13 @@ import os
 import re
 from datetime import datetime
 from PIL import Image
+import base64
 
 # --- Constants & Configuration ---
-# Use relative paths for deployment
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "data_storage.json")
 ICON_FILE = os.path.join(BASE_DIR, "assets", "icon.png")
+APPLE_ICON_FILE = os.path.join(BASE_DIR, "assets", "icon_apple.png")
 UPDATE_INTERVAL = 300 
 
 # Common Japanese Stock Names Mapping
@@ -39,6 +40,12 @@ def save_data(data):
     data['stocks'].sort(key=lambda x: x['ticker'])
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+def get_base64_image(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    return ""
 
 def normalize_ticker(ticker):
     t = ticker.strip().upper()
@@ -84,9 +91,27 @@ def fetch_price(ticker):
 
 # --- JS Helpers ---
 def inject_js():
+    # Apple Touch Icon Injection (Parent Head for iPhone support)
+    apple_b64 = get_base64_image(APPLE_ICON_FILE)
+    
     js = f"""
     <script>
-    if (!window.notificationLib) {{
+    if (!window.kanshikunInjected) {{
+        window.kanshikunInjected = true;
+        
+        // 5分おきの一括更新タイマー
+        setInterval(function() {{
+            const btn = window.parent.document.querySelector('button[kind="secondary"]');
+            if (btn && btn.innerText.includes("一括更新")) btn.click();
+        }}, {UPDATE_INTERVAL * 1000});
+
+        // 監視くん専用アイコンの注入
+        const head = window.parent.document.head;
+        const link = window.parent.document.createElement('link');
+        link.rel = 'apple-touch-icon';
+        link.href = 'data:image/png;base64,{apple_b64}';
+        head.appendChild(link);
+        
         window.notificationLib = {{
             requestPermission: function() {{
                 if (!("Notification" in window)) return;
@@ -98,10 +123,6 @@ def inject_js():
                 }}
             }}
         }};
-        setInterval(function() {{
-            const btn = window.parent.document.querySelector('button[kind="secondary"]');
-            if (btn && btn.innerText.includes("一括更新")) btn.click();
-        }}, {UPDATE_INTERVAL * 1000});
     }}
     </script>
     """
@@ -134,15 +155,12 @@ if "last_refresh" not in st.session_state:
 if "notified_targets" not in st.session_state:
     st.session_state.notified_targets = set()
 
-# Header with App Icon
+# Header
 c_h1, c_h2 = st.columns([1, 5])
 with c_h1:
-    if os.path.exists(ICON_FILE):
-        st.image(ICON_FILE, width=60)
-    else:
-        st.title("🏹")
-with c_h2:
-    st.title("買付監視くん")
+    if os.path.exists(ICON_FILE): st.image(ICON_FILE, width=60)
+    else: st.title("🏹")
+with c_h2: st.title("買付監視くん")
 
 # --- Search & Add ---
 with st.container():
