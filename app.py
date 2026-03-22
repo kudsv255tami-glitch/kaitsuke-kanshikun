@@ -1,25 +1,36 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
 import json
 import os
 import re
 from datetime import datetime
 from PIL import Image
 
-# --- Configuration & State ---
+# --- Constants & Configuration ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "data_storage.json")
 LOCAL_ICON = os.path.join(BASE_DIR, "assets", "icon.png")
 ICON_URL = "https://raw.githubusercontent.com/kudsv255tami-glitch/kaitsuke-kanshikun/main/assets/icon.png"
 UPDATE_INTERVAL = 300 
 
+# --- MUST BE FIRST ---
 st.set_page_config(page_title="買付監視くん", page_icon=Image.open(LOCAL_ICON) if os.path.exists(LOCAL_ICON) else "🏹", layout="centered")
 
+# Session State
 if "notified_targets" not in st.session_state: st.session_state.notified_targets = set()
 if "last_refresh" not in st.session_state: st.session_state.last_refresh = datetime.now()
 
-# --- Logic ---
+# Common Japanese Stock Names
+COMMON_JP_NAMES = {
+    "7203.T": "トヨタ自動車", "2914.T": "JT", "9432.T": "NTT", "9984.T": "ソフトバンクグループ",
+    "6758.T": "ソニーグループ", "8306.T": "三菱UFJフィナンシャルG", "8411.T": "みずほフィナンシャルG",
+    "8316.T": "三井住友フィナンシャルG", "7267.T": "本田技研工業", "6954.T": "ファナック",
+    "6098.T": "リクルートHD", "4502.T": "武田薬品工業", "7974.T": "任天堂", "9020.T": "JR東日本",
+    "9022.T": "JR東海", "9201.T": "日本航空", "9202.T": "ANAホールディングス", "4063.T": "信越化学工業",
+    "8031.T": "三井物産", "8058.T": "三菱商事", "8001.T": "伊藤忠商事", "435A.T": "iFreeETF 日本株 配当 ローテーション 戦略"
+}
+
+# --- Functions ---
 def load_data():
     if os.path.exists(DATA_FILE):
         try:
@@ -36,48 +47,39 @@ def normalize_ticker(ticker):
     if t.endswith(".T") or "." in t: return t
     return t + ".T" if len(t) == 4 else t
 
-def translate_name_aggressive(name):
-    translations = {"CORPORATION":"","CORP":"","LTD":"","INC":"","CO":"","HOLDINGS":"HD","GROUP":"G","JAPAN":"日本","EQUITY":"株","DIVIDEND":"配当","ROTATION":"ローテーション","STRATEGY":"戦略"}
-    res = name.upper()
-    for eng, jp in translations.items(): res = re.sub(rf'\b{eng}\b', jp, res)
-    return res.replace("  ", " ").strip()
-
 def fetch_price(ticker):
     final_ticker = normalize_ticker(ticker)
     try:
         stock = yf.Ticker(final_ticker)
         hist = stock.history(period="1d")
         if not hist.empty:
-            price = hist['Close'].iloc[-1]
+            p = hist['Close'].iloc[-1]
             info = stock.info
-            raw_name = info.get('longName') or info.get('shortName') or final_ticker
-            currency = "円" if info.get('currency', 'JPY') == "JPY" else "ドル"
-            name = translate_name_aggressive(raw_name) if final_ticker.endswith(".T") else raw_name
-            dividend = info.get('dividendYield', 0) * price if info.get('dividendYield') else info.get('trailingAnnualDividendRate', 0)
-            return round(price, 2), name, dividend, final_ticker, currency
+            name = COMMON_JP_NAMES.get(final_ticker)
+            if not name:
+                raw = info.get('longName') or info.get('shortName') or final_ticker
+                name = re.sub(r'\b(CORP|INC|LTD|HOLDINGS|GROUP|JAPAN)\b', '', raw.upper()).strip() if final_ticker.endswith(".T") else raw
+            u = "円" if info.get('currency', 'JPY') == "JPY" else "ドル"
+            d = info.get('dividendYield', 0) * p if info.get('dividendYield') else info.get('trailingAnnualDividendRate', 0)
+            return round(p, 2), name, d, final_ticker, u
         return None, None, 0, final_ticker, "円"
-    except Exception: return None, None, 0, final_ticker, "円"
+    except: return None, None, 0, final_ticker, "円"
 
-# --- UI Styling ---
+# --- UI Styling (Native App Look) ---
 st.markdown(f"""
 <style>
     header, footer, #MainMenu {{ visibility: hidden; display: none !important; }}
     [data-testid="stHeader"] {{ height: 0px !important; display: none !important; }}
-    [data-testid="stMainBlockContainer"] {{ padding: 1rem !important; padding-top: 1.5rem !important; max-width: 100% !important; }}
-    input, select, button {{ font-size: 16px !important; }}
+    [data-testid="stMainBlockContainer"] {{ padding: 1.2rem !important; padding-top: 1rem !important; max-width: 100% !important; }}
     .stApp {{ background-color: #f2f2f7; }}
-    .stock-card {{ background-color: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 12px; shadow: 0 1px 2px rgba(0,0,0,0.05); border: 1px solid #e5e5ea; }}
-    .stock-title {{ font-size: 1.3rem; font-weight: 800; color: #1c1c1e; display: flex; align-items: center; justify-content: space-between; }}
-    .ticker-badge {{ color: #8e8e93; font-size: 0.8rem; font-weight: 400; }}
-    .price-large {{ font-size: 2.3rem; font-weight: 900; color: #007aff; text-align: right; margin: 8px 0; letter-spacing: -1px; }}
-    .price-unit {{ font-size: 1rem; color: #3a3a3c; margin-left: 4px; }}
-    .target-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 1px solid #f2f2f7; padding-top: 12px; margin-top: 4px; }}
-    .target-col {{ display: flex; flex-direction: column; gap: 2px; }}
-    .label-tiny {{ font-size: 0.75rem; color: #8e8e93; font-weight: 500; }}
-    .val-bold {{ font-size: 1rem; font-weight: 700; color: #1c1c1e; }}
-    .pill {{ font-size: 0.7rem; font-weight: 800; padding: 3px 8px; border-radius: 10px; width: fit-content; margin-top: 4px; }}
-    .pill-ok {{ background-color: #34c759; color: white; }}
-    .pill-wait {{ background-color: #f2f2f7; color: #8e8e93; }}
+    div[data-testid="stExpander"] {{ background-color: white; border-radius: 12px; border: 1px solid #e5e5ea; }}
+    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {{ background-color: white; border-radius: 16px; padding: 10px; border: 1px solid #e5e5ea; }}
+    h1 {{ font-size: 1.6rem !important; margin: 0 !important; }}
+    .price-text {{ font-size: 2.2rem; font-weight: 900; color: #007aff; text-align: right; margin: 5px 0; line-height: 1; }}
+    .price-unit {{ font-size: 1rem; color: #3a3a3c; margin-left: 5px; }}
+    .label-text {{ font-size: 0.8rem; color: #8e8e93; font-weight: 600; }}
+    .val-text {{ font-size: 1rem; font-weight: 800; color: #1c1c1e; }}
+    .pill {{ font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 10px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,27 +89,27 @@ if (!window.kInjected) {{
     window.kInjected = true;
     setInterval(() => {{
         const btn = window.parent.document.querySelector('button[kind="secondary"]');
-        if (btn && (btn.innerText.includes("更新") || btn.innerText.includes("Refresh"))) btn.click();
+        if (btn && btn.innerText.includes("更新")) btn.click();
     }}, {UPDATE_INTERVAL * 1000});
-    const link = window.parent.document.createElement('link');
-    link.rel = 'apple-touch-icon'; link.href = '{ICON_URL}';
+    const link = window.parent.document.createElement('link'); link.rel = 'apple-touch-icon'; link.href = '{ICON_URL}';
     window.parent.document.head.appendChild(link);
 }}
 </script>
 """, height=0)
 
-# --- Main UI ---
-ch1, ch2 = st.columns([1, 5])
-with ch1:
+# --- Header ---
+c1, c2 = st.columns([1, 4])
+with c1:
     if os.path.exists(LOCAL_ICON): st.image(LOCAL_ICON, width=54)
     else: st.markdown("### 🏹")
-with ch2: st.markdown("<h1 style='margin:0; font-size:1.8rem;'>買付監視くん</h1>", unsafe_allow_html=True)
+with c2: st.markdown("<h1 style='padding-top:10px;'>買付監視くん</h1>", unsafe_allow_html=True)
 
-with st.expander("➕ 銘柄を追加", expanded=False):
+# --- Add ---
+with st.expander("➕ 銘柄を追加"):
     cs1, cs2 = st.columns([3, 1])
-    ticker_in = cs1.text_input("コード", placeholder="7203", label_visibility="collapsed").upper()
-    if cs2.button("追加", use_container_width=True, type="primary") and ticker_in:
-        p, n, d, t, u = fetch_price(ticker_in)
+    tin = cs1.text_input("コード", placeholder="例: 7203", label_visibility="collapsed").upper()
+    if cs2.button("追加", use_container_width=True, type="primary") and tin:
+        p, n, d, t, u = fetch_price(tin)
         if p:
             db = load_data()
             if not any(s['ticker'] == t for s in db['stocks']):
@@ -116,71 +118,69 @@ with st.expander("➕ 銘柄を追加", expanded=False):
             else: st.warning("追加済み")
         else: st.error("取得失敗")
 
+# --- List ---
 db = load_data()
 if not db['stocks']:
-    st.info("リストが空です")
+    st.info("銘柄を追加してください")
 else:
     for idx, s in enumerate(db['stocks']):
         unit = s.get("unit", "円")
-        p_now = s['last_price']
+        pnow = s['last_price']
         t1 = float(s.get('odd_lot_target', 0))
         t2 = float(s.get('one_lot_target', 0))
         
-        # Build HTML components separately to avoid parsing errors
-        pill1 = f'<div class="pill pill-ok">✅ 到達</div>' if (t1 > 0 and p_now <= t1) else f'<div class="pill pill-wait">監視中</div>' if t1 > 0 else ""
-        pill2 = f'<div class="pill pill-ok">✅ 到達</div>' if (t2 > 0 and p_now <= t2) else f'<div class="pill pill-wait">監視中</div>' if t2 > 0 else ""
-        
-        val1 = f"{t1:.2f}{unit}" if t1 > 0 else "未設定"
-        val2 = f"{t2:.2f}{unit}" if t2 > 0 else "未設定"
-        
-        card_html = f"""
-        <div class="stock-card">
-            <div class="stock-title">
-                {s['name']} <span class="ticker-badge">{s['ticker']}</span>
-            </div>
-            <div class="price-large">
-                {p_now:.2f}<span class="price-unit">{unit}</span>
-            </div>
-            <div class="target-grid">
-                <div class="target-col">
-                    <div class="label-tiny">単元未満</div>
-                    <div class="val-bold">{val1}</div>
-                    {pill1}
-                </div>
-                <div class="target-col">
-                    <div class="label-tiny">単元</div>
-                    <div class="val-bold">{val2}</div>
-                    {pill2}
-                </div>
-            </div>
-        </div>
-        """
-        st.markdown(card_html, unsafe_allow_html=True)
-        
-        if st.button(f"⚙️ 設定 ({s['ticker']})", key=f"btn_{s['ticker']}", use_container_width=True):
-            st.session_state[f"ed_{s['ticker']}"] = not st.session_state.get(f"ed_{s['ticker']}", False)
+        # --- Native Container Card ---
+        with st.container(border=True):
+            # Row 1: Title
+            st.markdown(f"**{s['name']}** <small style='color:#8e8e93'>{s['ticker']}</small>", unsafe_allow_html=True)
+            
+            # Row 2: Price
+            st.markdown(f'<div class="price-text">{pnow:.2f}<span class="price-unit">{unit}</span></div>', unsafe_allow_html=True)
+            
+            # Row 3: Targets
+            tc1, tc2 = st.columns(2)
+            # Target 1
+            tc1.markdown(f'<div class="label-text">単元未満</div>', unsafe_allow_html=True)
+            tc1.markdown(f'<div class="val-text">{t1:.2f}{unit if t1 > 0 else ""}</div>' if t1 > 0 else '<div class="val-text">未設定</div>', unsafe_allow_html=True)
+            if t1 > 0:
+                if pnow <= t1: tc1.success("✅ 到達", icon="🎯")
+                else: tc1.markdown('<span class="pill" style="background-color:#f2f2f7; color:#8e8e93;">監視中</span>', unsafe_allow_html=True)
+                
+            # Target 2
+            tc2.markdown(f'<div class="label-text">単元</div>', unsafe_allow_html=True)
+            tc2.markdown(f'<div class="val-text">{t2:.2f}{unit if t2 > 0 else ""}</div>' if t2 > 0 else '<div class="val-text">未設定</div>', unsafe_allow_html=True)
+            if t2 > 0:
+                if pnow <= t2: tc2.success("✅ 到達", icon="🎯")
+                else: tc2.markdown('<span class="pill" style="background-color:#f2f2f7; color:#8e8e93;">監視中</span>', unsafe_allow_html=True)
+            
+            st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+            
+            # Settings Button (Integrated at bottom of card)
+            if st.button(f"⚙️ 設定 ({s['ticker']})", key=f"btn_{s['ticker']}", use_container_width=True):
+                st.session_state[f"ed_{s['ticker']}"] = not st.session_state.get(f"ed_{s['ticker']}", False)
+            
+            if st.session_state.get(f"ed_{s['ticker']}", False):
+                with st.form(f"form_{s['ticker']}"):
+                    nn = st.text_input("表示名", value=s['name'])
+                    nu = st.selectbox("通貨", options=["円", "ドル"], index=0 if unit=="円" else 1)
+                    ec1, ec2 = st.columns(2)
+                    v1 = ec1.number_input("単元未満目標", value=t1, step=0.1)
+                    v2 = ec2.number_input("単元目標", value=t2, step=0.1)
+                    eb1, eb2 = st.columns(2)
+                    if eb1.form_submit_button("保存"):
+                        s['name'], s['unit'], s['odd_lot_target'], s['one_lot_target'] = nn, nu, v1, v2
+                        save_data(db); st.session_state[f"ed_{s['ticker']}"] = False; st.rerun()
+                    if eb2.form_submit_button("削除"):
+                        db['stocks'].pop(idx); save_data(db); st.rerun()
 
-        if st.session_state.get(f"ed_{s['ticker']}", False):
-            with st.form(f"form_{s['ticker']}"):
-                n_name = st.text_input("表示名", value=s['name'])
-                n_unit = st.selectbox("通貨", options=["円", "ドル"], index=0 if unit=="円" else 1)
-                c1, c2 = st.columns(2)
-                v1 = c1.number_input("単元未満目標", value=float(t1), step=0.1)
-                v2 = c2.number_input("単元目標", value=float(t2), step=0.1)
-                b1, b2 = st.columns(2)
-                if b1.form_submit_button("保存"):
-                    s['name'], s['unit'], s['odd_lot_target'], s['one_lot_target'] = n_name, n_unit, v1, v2
-                    save_data(db); st.session_state[f"ed_{s['ticker']}"] = False; st.rerun()
-                if b2.form_submit_button("削除"):
-                    db['stocks'].pop(idx); save_data(db); st.rerun()
-
+# --- Footer ---
 st.divider()
-cf1, cf2 = st.columns([3, 1])
-cf1.caption(f"最終更新: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
-if cf2.button("🔄 更新", use_container_width=True):
-    new_db = load_data()
-    for item in new_db['stocks']:
-        price, _, _, _, _ = fetch_price(item['ticker'])
-        if price: item['last_price'] = price
-    save_data(new_db)
+ff1, ff2 = st.columns([3, 1])
+ff1.caption(f"最終更新: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
+if ff2.button("🔄 更新", use_container_width=True):
+    ndb = load_data()
+    for item in ndb['stocks']:
+        px, _, _, _, _ = fetch_price(item['ticker'])
+        if px: item['last_price'] = px
+    save_data(ndb)
     st.session_state.last_refresh = datetime.now(); st.rerun()
