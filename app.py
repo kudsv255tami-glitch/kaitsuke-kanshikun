@@ -11,7 +11,18 @@ from PIL import Image
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "data_storage.json")
 LOCAL_ICON = os.path.join(BASE_DIR, "assets", "icon.png")
+ICON_URL = "https://raw.githubusercontent.com/kudsv255tami-glitch/kaitsuke-kanshikun/main/assets/icon.png"
 UPDATE_INTERVAL = 300 
+
+# --- CRITICAL: Set Page Config MUST be the very first Streamlit command ---
+app_icon = Image.open(LOCAL_ICON) if os.path.exists(LOCAL_ICON) else "🏹"
+st.set_page_config(page_title="買付監視くん", page_icon=app_icon, layout="centered")
+
+# Initialize Session State early
+if "notified_targets" not in st.session_state:
+    st.session_state.notified_targets = set()
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = datetime.now()
 
 # Common Japanese Stock Names Mapping
 COMMON_JP_NAMES = {
@@ -29,8 +40,7 @@ def load_data():
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            pass
+        except: pass
     return {"stocks": []}
 
 def save_data(data):
@@ -45,13 +55,7 @@ def normalize_ticker(ticker):
     return t
 
 def translate_name_aggressive(name):
-    translations = {
-        "CORPORATION": "", "CORP": "", "LTD": "", "INC": "", "CO": "", 
-        "HOLDINGS": "HD", "GROUP": "G",
-        "JAPAN": "日本", "EQUITY": "株", "DIVIDEND": "配当", "ROTATION": "ローテーション", "STRATEGY": "戦略",
-        "NIPPON": "日本", "TOYOTA": "トヨタ", "MOTOR": "自動車", "STEEL": "製鉄", "TOBACCO": "たばこ",
-        "AIRLINES": "航空", "RAILWAY": "鉄道", "ELECTRIC": "電気", "CHEMICAL": "化学"
-    }
+    translations = {"CORPORATION":"","CORP":"","LTD":"","INC":"","CO":"","HOLDINGS":"HD","GROUP":"G","JAPAN":"日本","EQUITY":"株","DIVIDEND":"配当","ROTATION":"ローテーション","STRATEGY":"戦略"}
     res = name.upper()
     for eng, jp in translations.items():
         res = re.sub(rf'\b{eng}\b', jp, res)
@@ -70,105 +74,68 @@ def fetch_price(ticker):
             unit = "円" if currency_code == "JPY" else "ドル"
             name = COMMON_JP_NAMES.get(final_ticker)
             if not name:
-                if final_ticker.endswith(".T") and any(c.isalpha() for c in raw_name):
-                    name = translate_name_aggressive(raw_name)
-                else:
-                    name = raw_name
+                name = translate_name_aggressive(raw_name) if final_ticker.endswith(".T") else raw_name
             dividend = info.get('dividendYield', 0) * price if info.get('dividendYield') else info.get('trailingAnnualDividendRate', 0)
             return round(price, 2), name, dividend, final_ticker, unit
         return None, None, 0, final_ticker, "円"
-    except Exception:
-        return None, None, 0, final_ticker, "円"
+    except Exception: return None, None, 0, final_ticker, "円"
 
-# --- JS & CSS Styling ---
-def apply_ios_styling():
-    # Hide Streamlit junk and adjust for mobile
-    st.markdown("""
-    <style>
-        /* Hide Header, Footer, Menu */
-        header, footer, #MainMenu, .stAppDeployButton {
-            visibility: hidden;
-            display: none !important;
-        }
-        [data-testid="stHeader"] { height: 0px !important; display: none !important; }
-        
-        /* Eliminate top/bottom blank space */
-        [data-testid="stMainBlockContainer"] {
-            padding-top: 1.5rem !important;
-            padding-bottom: 2rem !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            max-width: 100% !important;
-        }
-        
-        /* Prevent iOS zoom on input */
-        input, select, textarea, button { font-size: 16px !important; }
-        
-        /* Card Style for Stocks */
-        .stock-card {
-            background-color: #ffffff;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            border: 1px solid #f0f0f0;
-        }
-        .stock-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
-        .stock-title { font-size: 1.2rem; font-weight: 800; color: #1a1a1a; display: flex; align-items: center; gap: 6px; }
-        .ticker-badge { color: #8e8e93; font-size: 0.8rem; font-weight: 400; }
-        .price-display { font-size: 2rem; font-weight: 900; color: #007aff; text-align: right; line-height: 1; margin: 10px 0; }
-        .price-unit { font-size: 0.9rem; color: #444; margin-left: 4px; font-weight: 600; }
-        .target-row { display: flex; justify-content: space-between; border-top: 1px solid #f5f5f5; padding-top: 10px; margin-top: 5px; }
-        .target-item { text-align: left; }
-        .target-label { font-size: 0.75rem; color: #8e8e93; margin-bottom: 2px; }
-        .target-price { font-size: 0.95rem; font-weight: 700; color: #3a3a3c; }
-        .status-pill { font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; }
-        .pill-reached { background-color: #e1f5fe; color: #0288d1; border: 1px solid #b3e5fc; }
-        .pill-pending { background-color: #f2f2f7; color: #8e8e93; }
-        
-        /* App Background */
-        .stApp { background-color: #f2f2f7; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- UI Styling ---
+st.markdown(f"""
+<style>
+    header, footer, #MainMenu, .stAppDeployButton {{ visibility: hidden; display: none !important; }}
+    [data-testid="stHeader"] {{ height: 0px !important; display: none !important; }}
+    [data-testid="stMainBlockContainer"] {{ padding-top: 1.5rem !important; padding-bottom: 2rem !important; padding-left: 1rem !important; padding-right: 1rem !important; max-width: 100% !important; }}
+    input, select, textarea, button {{ font-size: 16px !important; }}
+    .stApp {{ background-color: #f2f2f7; }}
+    .stock-card {{ background-color: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #f0f0f0; }}
+    .stock-header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }}
+    .stock-title {{ font-size: 1.25rem; font-weight: 800; color: #1a1a1a; display: flex; align-items: center; gap: 6px; }}
+    .ticker-badge {{ color: #8e8e93; font-size: 0.8rem; font-weight: 400; }}
+    .price-display {{ font-size: 2.2rem; font-weight: 900; color: #007aff; text-align: right; line-height: 1; margin: 10px 0; }}
+    .price-unit {{ font-size: 1rem; color: #444; margin-left: 4px; font-weight: 600; }}
+    .target-row {{ display: flex; justify-content: space-between; border-top: 1px solid #f5f5f5; padding-top: 10px; margin-top: 5px; }}
+    .target-item {{ text-align: left; width: 48%; }}
+    .target-label {{ font-size: 0.8rem; color: #8e8e93; margin-bottom: 2px; }}
+    .target-price {{ font-size: 1rem; font-weight: 700; color: #3a3a3c; }}
+    .status-pill {{ font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; }}
+    .pill-reached {{ background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }}
+    .pill-pending {{ background-color: #f2f2f7; color: #8e8e93; }}
+</style>
+""", unsafe_allow_html=True)
 
-    # JS for automatic triggers
-    js = f"""
-    <script>
-    if (!window.kanshikunInjected) {{
-        window.kanshikunInjected = true;
-        // Auto-refresh timer
-        setInterval(function() {{
-            const btn = window.parent.document.querySelector('button[kind="secondary"]');
-            if (btn && btn.innerText.includes("一括更新")) btn.click();
-        }}, {UPDATE_INTERVAL * 1000});
-        
-        window.notificationLib = {{
-            requestPermission: function() {{ if (Notification) Notification.requestPermission(); }},
-            send: function(title, body) {{ if (Notification && Notification.permission === "granted") new Notification(title, {{ body: body }}); }}
-        }};
-    }}
-    </script>
-    """
-    st.components.v1.html(js, height=0)
+# JS for Icon & Refresh
+st.components.v1.html(f"""
+<script>
+if (!window.kanshikunInjected) {{
+    window.kanshikunInjected = true;
+    setInterval(function() {{
+        const btn = window.parent.document.querySelector('button[kind="secondary"]');
+        if (btn && btn.innerText.includes("更新")) btn.click();
+    }}, {UPDATE_INTERVAL * 1000});
+    const head = window.parent.document.head;
+    const link = window.parent.document.createElement('link');
+    link.rel = 'apple-touch-icon';
+    link.href = '{ICON_URL}';
+    head.appendChild(link);
+    window.notificationLib = {{
+        requestPermission: function() {{ if(Notification) Notification.requestPermission(); }},
+        send: function(t, b) {{ if(Notification && Notification.permission==="granted") new Notification(t, {{body:b}}); }}
+    }};
+}}
+</script>
+""", height=0)
 
 def trigger_notification(title, body):
-    js = f"<script>if(window.notificationLib) window.notificationLib.send('{title}', '{body}');</script>"
-    st.components.v1.html(js, height=0)
+    st.components.v1.html(f"<script>if(window.notificationLib) window.notificationLib.send('{title}', '{body}');</script>", height=0)
 
-# --- App Execution ---
-apply_ios_styling()
-app_icon = Image.open(LOCAL_ICON) if os.path.exists(LOCAL_ICON) else "🏹"
-st.set_page_config(page_title="買付監視くん", page_icon=app_icon, layout="centered")
-
-# Custom App Header
-col_h1, col_h2 = st.columns([1, 4])
-with col_h1:
+# --- App UI ---
+c_h1, c_h2 = st.columns([1, 4])
+with c_h1:
     if os.path.exists(LOCAL_ICON): st.image(LOCAL_ICON, width=54)
     else: st.markdown("### 🏹")
-with col_h2:
-    st.markdown("<h1 style='margin:0; padding:0; font-size:1.8rem;'>買付監視くん</h1>", unsafe_allow_html=True)
+with c_h2: st.markdown("<h1 style='margin:0; padding:0; font-size:1.8rem;'>買付監視くん</h1>", unsafe_allow_html=True)
 
-# Add Stock - Minimalist
 with st.expander("➕ 銘柄を追加", expanded=False):
     c_s1, c_s2 = st.columns([3, 1])
     search_ticker = c_s1.text_input("証券コード", placeholder="7203, AAPL", label_visibility="collapsed").upper()
@@ -181,24 +148,18 @@ with st.expander("➕ 銘柄を追加", expanded=False):
                     data['stocks'].append({"ticker": final_ticker, "name": name, "last_price": price, "last_div": div, "unit": unit, "odd_lot_target": 0.0, "one_lot_target": 0.0})
                     save_data(data)
                     st.rerun()
-                else: st.warning("追加済みです。")
+                else: st.warning("追加済み")
             else: st.error("不明なコード")
 
-# Watchlist
 data = load_data()
-data['stocks'].sort(key=lambda x: x['ticker'])
-
 if not data['stocks']:
     st.info("リストが空です。銘柄を追加してください。")
 else:
     pending_alerts = []
     for idx, stock in enumerate(data['stocks']):
-        # Using a card containers approach
         price_unit = stock.get("unit", "円")
-        
-        # Check targets
-        odd_reached = stock.get('odd_lot_target', 0) > 0 and stock['last_price'] <= stock['odd_lot_target']
-        one_reached = stock.get('one_lot_target', 0) > 0 and stock['last_price'] <= stock['one_lot_target']
+        odd_reached = float(stock.get('odd_lot_target', 0)) > 0 and stock['last_price'] <= stock.get('odd_lot_target', 0)
+        one_reached = float(stock.get('one_lot_target', 0)) > 0 and stock['last_price'] <= stock.get('one_lot_target', 0)
         
         st.markdown(f"""
         <div class="stock-card">
@@ -223,7 +184,6 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        # Action Button (Minimal)
         if st.button(f"⚙️ 設定 ({stock['ticker']})", key=f"set_{stock['ticker']}", type="secondary", use_container_width=True):
             st.session_state[f"edit_{stock['ticker']}"] = not st.session_state.get(f"edit_{stock['ticker']}", False)
 
@@ -246,7 +206,6 @@ else:
                     st.session_state[f"edit_{stock['ticker']}"] = False
                     st.rerun()
 
-        # Notifications logic
         if odd_reached:
             aid = f"{stock['ticker']}_odd_{stock['odd_lot_target']}"
             if aid not in st.session_state.notified_targets:
@@ -260,18 +219,16 @@ else:
 
     for n, l, p in pending_alerts: trigger_notification(f"【{l}】到達", f"{n} が {p} に到達しました！")
 
-# Footer Area
-st.markdown("<br><br>", unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True)
 c_f1, c_f2 = st.columns([3, 1])
 c_f1.caption(f"最終更新: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
 if c_f2.button("🔄 更新", use_container_width=True):
-    with st.spinner():
-        u_data = load_data()
-        for s in u_data['stocks']:
-            p, _, d, _, u = fetch_price(s['ticker'])
-            if p: s['last_price'], s['last_div'] = p, d
-        save_data(u_data)
-        st.session_state.last_refresh = datetime.now()
+    u_data = load_data()
+    for s in u_data['stocks']:
+        p, _, d, _, u = fetch_price(s['ticker'])
+        if p: s['last_price'], s['last_div'] = p, d
+    save_data(u_data)
+    st.session_state.last_refresh = datetime.now()
     st.rerun()
 
 if st.sidebar.button("🔔 通知許可"):
