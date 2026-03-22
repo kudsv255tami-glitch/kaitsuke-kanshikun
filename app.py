@@ -10,8 +10,6 @@ from PIL import Image
 # --- Constants & Configuration ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "data_storage.json")
-# Using the Public Raw GitHub URL for the best compatibility with iOS Safari
-ICON_URL = "https://raw.githubusercontent.com/kudsv255tami-glitch/kaitsuke-kanshikun/main/assets/icon.png"
 LOCAL_ICON = os.path.join(BASE_DIR, "assets", "icon.png")
 UPDATE_INTERVAL = 300 
 
@@ -82,37 +80,71 @@ def fetch_price(ticker):
     except Exception:
         return None, None, 0, final_ticker, "円"
 
-# --- JS Helpers ---
-def inject_js():
+# --- JS & CSS Styling ---
+def apply_ios_styling():
+    # Hide Streamlit junk and adjust for mobile
+    st.markdown("""
+    <style>
+        /* Hide Header, Footer, Menu */
+        header, footer, #MainMenu, .stAppDeployButton {
+            visibility: hidden;
+            display: none !important;
+        }
+        [data-testid="stHeader"] { height: 0px !important; display: none !important; }
+        
+        /* Eliminate top/bottom blank space */
+        [data-testid="stMainBlockContainer"] {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            max-width: 100% !important;
+        }
+        
+        /* Prevent iOS zoom on input */
+        input, select, textarea, button { font-size: 16px !important; }
+        
+        /* Card Style for Stocks */
+        .stock-card {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #f0f0f0;
+        }
+        .stock-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+        .stock-title { font-size: 1.2rem; font-weight: 800; color: #1a1a1a; display: flex; align-items: center; gap: 6px; }
+        .ticker-badge { color: #8e8e93; font-size: 0.8rem; font-weight: 400; }
+        .price-display { font-size: 2rem; font-weight: 900; color: #007aff; text-align: right; line-height: 1; margin: 10px 0; }
+        .price-unit { font-size: 0.9rem; color: #444; margin-left: 4px; font-weight: 600; }
+        .target-row { display: flex; justify-content: space-between; border-top: 1px solid #f5f5f5; padding-top: 10px; margin-top: 5px; }
+        .target-item { text-align: left; }
+        .target-label { font-size: 0.75rem; color: #8e8e93; margin-bottom: 2px; }
+        .target-price { font-size: 0.95rem; font-weight: 700; color: #3a3a3c; }
+        .status-pill { font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; }
+        .pill-reached { background-color: #e1f5fe; color: #0288d1; border: 1px solid #b3e5fc; }
+        .pill-pending { background-color: #f2f2f7; color: #8e8e93; }
+        
+        /* App Background */
+        .stApp { background-color: #f2f2f7; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # JS for automatic triggers
     js = f"""
     <script>
     if (!window.kanshikunInjected) {{
         window.kanshikunInjected = true;
-        
-        // Timer for auto-refresh
+        // Auto-refresh timer
         setInterval(function() {{
             const btn = window.parent.document.querySelector('button[kind="secondary"]');
             if (btn && btn.innerText.includes("一括更新")) btn.click();
         }}, {UPDATE_INTERVAL * 1000});
-
-        // Robust Apple Touch Icon Injection
-        const head = window.parent.document.head;
-        const link = window.parent.document.createElement('link');
-        link.rel = 'apple-touch-icon';
-        link.href = '{ICON_URL}';
-        head.appendChild(link);
         
-        // Notification Lib
         window.notificationLib = {{
-            requestPermission: function() {{
-                if (!("Notification" in window)) return;
-                Notification.requestPermission();
-            }},
-            send: function(title, body) {{
-                if (window.Notification && Notification.permission === "granted") {{
-                    new Notification(title, {{ body: body }});
-                }}
-            }}
+            requestPermission: function() {{ if (Notification) Notification.requestPermission(); }},
+            send: function(title, body) {{ if (Notification && Notification.permission === "granted") new Notification(title, {{ body: body }}); }}
         }};
     }}
     </script>
@@ -123,40 +155,25 @@ def trigger_notification(title, body):
     js = f"<script>if(window.notificationLib) window.notificationLib.send('{title}', '{body}');</script>"
     st.components.v1.html(js, height=0)
 
-# --- Streamlit UI Setup ---
+# --- App Execution ---
+apply_ios_styling()
 app_icon = Image.open(LOCAL_ICON) if os.path.exists(LOCAL_ICON) else "🏹"
 st.set_page_config(page_title="買付監視くん", page_icon=app_icon, layout="centered")
 
-st.markdown("""
-<style>
-    .stApp { background-color: #ffffff; }
-    .search-area { background-color: #f8f9fa; padding: 25px; border-radius: 10px; margin-bottom: 30px; }
-    .stock-row { padding: 15px 0; border-bottom: 2px solid #f1f3f5; }
-    .stock-name { font-size: 1.5rem !important; font-weight: 800; color: #111; }
-    .metric-val { font-size: 2.2rem; font-weight: 900; color: #0066cc; text-align: right; }
-    .unit-label { font-size:1rem; color:#444; margin-left:8px; }
-</style>
-""", unsafe_allow_html=True)
+# Custom App Header
+col_h1, col_h2 = st.columns([1, 4])
+with col_h1:
+    if os.path.exists(LOCAL_ICON): st.image(LOCAL_ICON, width=54)
+    else: st.markdown("### 🏹")
+with col_h2:
+    st.markdown("<h1 style='margin:0; padding:0; font-size:1.8rem;'>買付監視くん</h1>", unsafe_allow_html=True)
 
-if "last_refresh" not in st.session_state: st.session_state.last_refresh = datetime.now()
-if "notified_targets" not in st.session_state: st.session_state.notified_targets = set()
-
-# Header
-c_h1, c_h2 = st.columns([1, 5])
-with c_h1:
-    if os.path.exists(LOCAL_ICON): st.image(LOCAL_ICON, width=60)
-    else: st.title("🏹")
-with c_h2: st.title("買付監視くん")
-
-# --- Search & Add ---
-with st.container():
-    st.markdown('<div class="search-area">', unsafe_allow_html=True)
-    st.write("**🔍 銘柄を追加**")
-    c_s1, c_s2 = st.columns([4, 1])
-    search_ticker = c_s1.text_input("証券コード", label_visibility="collapsed", placeholder="例: 7203, AAPL", key="search_box").upper()
-    msg_container = st.empty()
+# Add Stock - Minimalist
+with st.expander("➕ 銘柄を追加", expanded=False):
+    c_s1, c_s2 = st.columns([3, 1])
+    search_ticker = c_s1.text_input("証券コード", placeholder="7203, AAPL", label_visibility="collapsed").upper()
     if c_s2.button("追加", use_container_width=True, type="primary") and search_ticker:
-        with st.spinner("情報を取得中..."):
+        with st.spinner("取得中..."):
             price, name, div, final_ticker, unit = fetch_price(search_ticker)
             if price:
                 data = load_data()
@@ -164,77 +181,91 @@ with st.container():
                     data['stocks'].append({"ticker": final_ticker, "name": name, "last_price": price, "last_div": div, "unit": unit, "odd_lot_target": 0.0, "one_lot_target": 0.0})
                     save_data(data)
                     st.rerun()
-                else: msg_container.warning("追加済みです。")
-            else: msg_container.error("見つかりませんでした。")
-    st.markdown('</div>', unsafe_allow_html=True)
+                else: st.warning("追加済みです。")
+            else: st.error("不明なコード")
 
-# --- Watchlist ---
-inject_js()
+# Watchlist
 data = load_data()
 data['stocks'].sort(key=lambda x: x['ticker'])
 
 if not data['stocks']:
-    st.info("監視リストが空です。")
+    st.info("リストが空です。銘柄を追加してください。")
 else:
-    st.markdown(f"### 👀 監視リスト（{len(data['stocks'])}銘柄）")
     pending_alerts = []
     for idx, stock in enumerate(data['stocks']):
-        st.markdown(f'<div class="stock-row">', unsafe_allow_html=True)
-        col_main, col_btn = st.columns([3, 1])
-        with col_main:
-            st.markdown(f'<div class="stock-name">{stock["name"]} <small style="color:#888">{stock["ticker"]}</small></div>', unsafe_allow_html=True)
-        with col_btn:
-            edit_key = f"edit_{stock['ticker']}"
-            if st.button("設定", key=f"btn_{stock['ticker']}", use_container_width=True):
-                st.session_state[edit_key] = not st.session_state.get(edit_key, False)
-        
+        # Using a card containers approach
         price_unit = stock.get("unit", "円")
-        st.columns([1, 1])[1].markdown(f'<div class="metric-val">{stock["last_price"]:.2f}<span class="unit-label">{price_unit}</span></div>', unsafe_allow_html=True)
+        
+        # Check targets
+        odd_reached = stock.get('odd_lot_target', 0) > 0 and stock['last_price'] <= stock['odd_lot_target']
+        one_reached = stock.get('one_lot_target', 0) > 0 and stock['last_price'] <= stock['one_lot_target']
+        
+        st.markdown(f"""
+        <div class="stock-card">
+            <div class="stock-header">
+                <div class="stock-title">{stock['name']} <span class="ticker-badge">{stock['ticker']}</span></div>
+            </div>
+            <div class="price-display">
+                {stock['last_price']:.2f}<span class="price-unit">{price_unit}</span>
+            </div>
+            <div class="target-row">
+                <div class="target-item">
+                    <div class="target-label">単元未満</div>
+                    <div class="target-price">{f"{stock['odd_lot_target']:.2f}{price_unit}" if stock['odd_lot_target'] > 0 else "未設定"}</div>
+                    {"<span class='status-pill pill-reached'>✅ 到達</span>" if odd_reached else "<span class='status-pill pill-pending'>監視中</span>" if stock['odd_lot_target'] > 0 else ""}
+                </div>
+                <div class="target-item">
+                    <div class="target-label">単元</div>
+                    <div class="target-price">{f"{stock['one_lot_target']:.2f}{price_unit}" if stock['one_lot_target'] > 0 else "未設定"}</div>
+                    {"<span class='status-pill pill-reached'>✅ 到達</span>" if one_reached else "<span class='status-pill pill-pending'>監視中</span>" if stock['one_lot_target'] > 0 else ""}
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Action Button (Minimal)
+        if st.button(f"⚙️ 設定 ({stock['ticker']})", key=f"set_{stock['ticker']}", type="secondary", use_container_width=True):
+            st.session_state[f"edit_{stock['ticker']}"] = not st.session_state.get(f"edit_{stock['ticker']}", False)
 
-        if st.session_state.get(edit_key, False):
-            with st.container():
-                st.markdown('<div style="background-color:#f8f9fa; padding:15px; border-radius:10px; border:1px solid #ddd; margin-top:10px;">', unsafe_allow_html=True)
-                with st.form(f"f_{stock['ticker']}"):
-                    new_name = st.text_input("表示名", value=stock['name'])
-                    new_unit = st.selectbox("通貨単位", options=["円", "ドル"], index=0 if price_unit == "円" else 1)
-                    ce1, ce2 = st.columns(2)
-                    new_odd = ce1.number_input(f"単元未満ライン ({new_unit})", value=float(stock.get('odd_lot_target', 0)), step=0.1)
-                    new_one = ce2.number_input(f"単元ライン ({new_unit})", value=float(stock.get('one_lot_target', 0)), step=0.1)
-                    if st.form_submit_button("保存"):
-                        stock['name'], stock['unit'], stock['odd_lot_target'], stock['one_lot_target'] = new_name, new_unit, new_odd, new_one
-                        save_data(data)
-                        st.session_state[edit_key] = False
-                        st.rerun()
-                    if st.form_submit_button("削除"):
-                        data['stocks'].pop(idx)
-                        save_data(data)
-                        st.session_state[edit_key] = False
-                        st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
+        if st.session_state.get(f"edit_{stock['ticker']}", False):
+            with st.form(f"f_{stock['ticker']}"):
+                new_name = st.text_input("表示名", value=stock['name'])
+                new_unit = st.selectbox("通貨単位", options=["円", "ドル"], index=0 if price_unit == "円" else 1)
+                ce1, ce2 = st.columns(2)
+                new_odd = ce1.number_input(f"単元未満ライン", value=float(stock.get('odd_lot_target', 0)), step=0.1)
+                new_one = ce2.number_input(f"単元ライン", value=float(stock.get('one_lot_target', 0)), step=0.1)
+                b1, b2 = st.columns(2)
+                if b1.form_submit_button("保存"):
+                    stock['name'], stock['unit'], stock['odd_lot_target'], stock['one_lot_target'] = new_name, new_unit, new_odd, new_one
+                    save_data(data)
+                    st.session_state[f"edit_{stock['ticker']}"] = False
+                    st.rerun()
+                if b2.form_submit_button("削除"):
+                    data['stocks'].pop(idx)
+                    save_data(data)
+                    st.session_state[f"edit_{stock['ticker']}"] = False
+                    st.rerun()
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        t_col1, t_col2 = st.columns(2)
-        for i, (label, val) in enumerate([("単元未満", stock.get('odd_lot_target', 0)), ("単元", stock.get('one_lot_target', 0))]):
-            area = t_col1 if i == 0 else t_col2
-            if val > 0:
-                reached = stock['last_price'] <= val
-                t_cls, t_txt = ("#e6fced; color: #1a7f37", "✅ 到達") if reached else ("#f1f3f5; color: #5f6368", "監視中")
-                area.markdown(f'{label}: <b>{val:.2f}{price_unit}</b> <span style="background-color:{t_cls}; padding:4px 10px; border-radius:5px; font-size:0.8rem; font-weight:bold;">{t_txt}</span>', unsafe_allow_html=True)
-                if reached:
-                    aid = f"{stock['ticker']}_{label}_{val}"
-                    if aid not in st.session_state.notified_targets:
-                        pending_alerts.append((stock['name'], label, f"{val:.2f}{price_unit}"))
-                        st.session_state.notified_targets.add(aid)
-            else: area.markdown(f'<span style="color:#bbb;">{label}: 未設定</span>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        # Notifications logic
+        if odd_reached:
+            aid = f"{stock['ticker']}_odd_{stock['odd_lot_target']}"
+            if aid not in st.session_state.notified_targets:
+                pending_alerts.append((stock['name'], "単元未満", f"{stock['odd_lot_target']:.2f}{price_unit}"))
+                st.session_state.notified_targets.add(aid)
+        if one_reached:
+            aid = f"{stock['ticker']}_one_{stock['one_lot_target']}"
+            if aid not in st.session_state.notified_targets:
+                pending_alerts.append((stock['name'], "単元", f"{stock['one_lot_target']:.2f}{price_unit}"))
+                st.session_state.notified_targets.add(aid)
 
     for n, l, p in pending_alerts: trigger_notification(f"【{l}】到達", f"{n} が {p} に到達しました！")
 
-st.divider()
+# Footer Area
+st.markdown("<br><br>", unsafe_allow_html=True)
 c_f1, c_f2 = st.columns([3, 1])
-c_f1.caption(f"最終更新: {st.session_state.last_refresh.strftime('%H:%M:%S')} (自動更新中)")
-if c_f2.button("🔄 一括更新", use_container_width=True):
-    with st.spinner("株価を更新中..."):
+c_f1.caption(f"最終更新: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
+if c_f2.button("🔄 更新", use_container_width=True):
+    with st.spinner():
         u_data = load_data()
         for s in u_data['stocks']:
             p, _, d, _, u = fetch_price(s['ticker'])
