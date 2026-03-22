@@ -1,0 +1,13 @@
+{
+    "stocks": [
+        {
+            "ticker": "2914.T",
+            "name": "JT",
+            "last_price": 5847.0,
+            "last_div": 24206.579999999998,
+            "unit": "円",
+            "odd_lot_target": 6900.0,
+            "one_lot_target": 6000.0
+        }
+    ]
+}
